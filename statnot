@@ -94,7 +94,7 @@ def readconfig(filename):
     for setting in ("DEFAULT_NOTIFY_TIMEOUT", "MAX_NOTIFY_TIMEOUT",
                     "NOTIFICATION_MAX_LENGTH", "STATUS_UPDATE_INTERVAL",
                     "STATUS_COMMAND", "USE_STATUSTEXT", "QUEUE_NOTIFICATIONS",
-                    "update_text"):
+                    "DISPLAY_FORMAT", "update_text"):
         if hasattr(config, setting):
             globals()[setting] = getattr(config, setting)
 
@@ -258,7 +258,22 @@ class NotificationFetcher(dbus.service.Object):
             self._id += 1
             notification_id = self._id
 
-        text = "{}".format(' '.join(DISPLAY_FORMAT)).strip()
+        text = ''
+        for option in DISPLAY_FORMAT:
+            if option == 'app_name':
+                text += "{} ".format(app_name)
+            elif option == 'notification_id':
+                text += "{} ".format(notification_id)
+            elif option == 'app_icon':
+                text += "{} ".format(app_icon)
+            elif option == 'summary':
+                text += "{} ".format(summary)
+            elif option == 'body':
+                text += "{} ".format(body)
+            else:
+                text += "{} ".format(option)
+
+        text.strip()
         add_notification([notification_id,
                           text[:NOTIFICATION_MAX_LENGTH],
                           int(expire_timeout) / 1000.0])
@@ -336,9 +351,12 @@ Configuration:
     #   app_icon,
     #   summary
     #   body
-    #   actions
-    #   hints
-    DISPLAY_FORMAT = [app_name, summary, body]
+    #
+    # This can also take raw strings that will be placed in every notification.
+    # (Good for parsing the output with key phrases delineating types of
+    # content)
+    #DISPLAY_FORMAT = ['APPN', 'app_name', 'SUMM', 'summary', 'BODY', 'body']
+    DISPLAY_FORMAT = ['app_name', 'summary', 'body']
 
     # update_text(text) is called when the status text should be updated
     # If there is a pending notification to be formatted, it is appended as
