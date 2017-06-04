@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 
 #
 #   statnot - Status and Notifications
@@ -67,7 +67,8 @@ def update_text(text):
     """
     This is used for dwm, but can be overridden in the config file
     """
-    subprocess.call(["xsetroot", "-name", text])
+    first_line = text.splitlines()[0] if text else ''
+    subprocess.call(["xsetroot", "-name", first_line])
 
 # ===== CONFIGURATION END =====
 
