@@ -31,8 +31,10 @@
 import dbus
 import dbus.service
 import dbus.mainloop.glib
-# import gobject
-from gi.repository import GObject as gobject
+try:
+    import gobject
+except ImportError:
+    from gi.repository import GObject as gobject
 import os
 import subprocess
 import sys
@@ -61,6 +63,7 @@ STATUS_UPDATE_INTERVAL = 2.0  # seconds
 STATUS_COMMAND = ["/bin/sh", "{}/.statusline.sh".format(os.getenv("HOME"))]
 USE_STATUSTEXT = True
 QUEUE_NOTIFICATIONS = True
+DISPLAY_FORMAT = ['app_name', 'summary', 'body']
 
 
 def update_text(text):
@@ -255,7 +258,7 @@ class NotificationFetcher(dbus.service.Object):
             self._id += 1
             notification_id = self._id
 
-        text = ("{} {}".format(summary, body)).strip()
+        text = "{}".format(' '.join(DISPLAY_FORMAT)).strip()
         add_notification([notification_id,
                           text[:NOTIFICATION_MAX_LENGTH],
                           int(expire_timeout) / 1000.0])
@@ -325,6 +328,17 @@ Configuration:
     # Put incoming notifications in a queue, so each one is shown.
     # If false, the most recent notification is shown directly.
     QUEUE_NOTIFICATIONS = True"
+
+    # Choose which content to display in the notification. This will display
+    # them in the order that they are placed in the list. Possible options are:
+    #   app_name
+    #   notification_id
+    #   app_icon,
+    #   summary
+    #   body
+    #   actions
+    #   hints
+    DISPLAY_FORMAT = [app_name, summary, body]
 
     # update_text(text) is called when the status text should be updated
     # If there is a pending notification to be formatted, it is appended as
