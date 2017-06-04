@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 #
 #   statnot - Status and Notifications
@@ -10,7 +10,7 @@
 #
 #   Note: VERY early prototype, to get feedback.
 #
-#   Copyright (c) 2009-2011 by the authors
+#   Copyright (c) 2009 by Henrik Hallberg (halhen@k2h.se)
 #   http://code.k2h.se
 #   Please report bugs or feature requests by e-mail.
 #
@@ -31,77 +31,98 @@
 import dbus
 import dbus.service
 import dbus.mainloop.glib
-import gobject
+# import gobject
+from gi.repository import GObject as gobject
 import os
 import subprocess
 import sys
-import thread
+try:
+    import thread
+except ImportError:
+    import _thread as thread
 import time
-from htmlentitydefs import name2codepoint as n2cp
+# Python 2 should `pip install future` for html.entries to work
+# Otherwise, we default back to htmlentitydefs if we can't find it
+try:
+    from html.entities import name2codepoint as n2cp
+except ImportError:
+    from htmlentitydefs import name2codepoint as n2cp
 import re
+from builtins import chr
 
 # ===== CONFIGURATION DEFAULTS =====
 #
 # See helpstring below for what each setting does
 
-DEFAULT_NOTIFY_TIMEOUT = 3000 # milliseconds
-MAX_NOTIFY_TIMEOUT = 5000 # milliseconds
-NOTIFICATION_MAX_LENGTH = 100 # number of characters
-STATUS_UPDATE_INTERVAL = 2.0 # seconds
-STATUS_COMMAND = ["/bin/sh", "%s/.statusline.sh" % os.getenv("HOME")]
-USE_STATUSTEXT=True
-QUEUE_NOTIFICATIONS=True
+DEFAULT_NOTIFY_TIMEOUT = 3000  # milliseconds
+MAX_NOTIFY_TIMEOUT = 5000  # milliseconds
+NOTIFICATION_MAX_LENGTH = 100  # number of characters
+STATUS_UPDATE_INTERVAL = 2.0  # seconds
+STATUS_COMMAND = ["/bin/sh", "{}/.statusline.sh".format(os.getenv("HOME"))]
+USE_STATUSTEXT = True
+QUEUE_NOTIFICATIONS = True
 
-# dwm
+
 def update_text(text):
-    # Get first line
-    first_line = text.splitlines()[0] if text else ''
-    subprocess.call(["xsetroot", "-name", first_line])
+    """
+    This is used for dwm, but can be overridden in the config file
+    """
+    subprocess.call(["xsetroot", "-name", text])
 
 # ===== CONFIGURATION END =====
+
 
 def _getconfigvalue(configmodule, name, default):
     if hasattr(configmodule, name):
         return getattr(configmodule, name)
     return default
 
+
 def readconfig(filename):
     import imp
     try:
         config = imp.load_source("config", filename)
     except Exception as e:
-        print "Error: failed to read config file %s" % filename
-        print e
+        print("Error: failed to read config file {}".format(filename))
+        print(e)
         sys.exit(2)
 
-    for setting in ("DEFAULT_NOTIFY_TIMEOUT", "MAX_NOTIFY_TIMEOUT", "NOTIFICATION_MAX_LENGTH", "STATUS_UPDATE_INTERVAL",
-                    "STATUS_COMMAND", "USE_STATUSTEXT", "QUEUE_NOTIFICATIONS", "update_text"):
+    for setting in ("DEFAULT_NOTIFY_TIMEOUT", "MAX_NOTIFY_TIMEOUT",
+                    "NOTIFICATION_MAX_LENGTH", "STATUS_UPDATE_INTERVAL",
+                    "STATUS_COMMAND", "USE_STATUSTEXT", "QUEUE_NOTIFICATIONS",
+                    "update_text"):
         if hasattr(config, setting):
             globals()[setting] = getattr(config, setting)
 
-def strip_tags(value):
-  "Return the given HTML with all tags stripped."
-  return re.sub(r'<[^>]*?>', '', value)
 
-# from http://snipplr.com/view/19472/decode-html-entities/
-# also on http://snippets.dzone.com/posts/show/4569
+def strip_tags(value):
+    "Return the given HTML with all tags stripped."
+    return re.sub(r'<[^>]*?>', '', value)
+
+
 def substitute_entity(match):
-  ent = match.group(3)
-  if match.group(1) == "#":
-    if match.group(2) == '':
-      return unichr(int(ent))
-    elif match.group(2) == 'x':
-      return unichr(int('0x'+ent, 16))
-  else:
-    cp = n2cp.get(ent)
+    """
+    from http://snipplr.com/view/19472/decode-html-entities/
+    also on http://snippets.dzone.com/posts/show/4569
+    """
+    ent = match.group(3)
+    if match.group(1) == "#":
+        if match.group(2) == '':
+            return chr(int(ent))
+        elif match.group(2) == 'x':
+            return chr(int('0x'+ent, 16))
+        else:
+            cp = n2cp.get(ent)
     if cp:
-      return unichr(cp)
+        return chr(cp)
     else:
-      return match.group()
+        return match.group()
+
 
 def decode_htmlentities(string):
-  entity_re = re.compile(r'&(#?)(x?)(\w+);')
-  return entity_re.subn(substitute_entity, string)[0]
+    entity_re = re.compile(r'&(#?)(x?)(\w+);')
+    return entity_re.subn(substitute_entity, string)[0]
+
 
 # List of not shown notifications.
 # Array of arrays: [id, text, timeout in s]
@@ -111,24 +132,28 @@ def decode_htmlentities(string):
 notification_queue = []
 notification_queue_lock = thread.allocate_lock()
 
+
 def add_notification(notif):
     with notification_queue_lock:
         for index, n in enumerate(notification_queue):
-            if n[0] == notif[0]: # same id, replace instead of queue
+            if n[0] == notif[0]:  # same id, replace instead of queue
                 n[1:] = notif[1:]
                 return
 
         notification_queue.append(notif)
 
-def next_notification(pop = False):
+
+def next_notification(pop=False):
     # No need to be thread safe here. Also most common scenario
     if not notification_queue:
         return None
 
     with notification_queue_lock:
         if QUEUE_NOTIFICATIONS:
-            # If there are several pending messages, discard the first 0-timeouts
-            while len(notification_queue) > 1 and notification_queue[0][2] == 0:
+            # If there are several pending messages,
+            # discard the first 0-timeouts
+            while (len(notification_queue) > 1 and
+                   notification_queue[0][2] == 0):
                 notification_queue.pop(0)
         else:
             while len(notification_queue) > 1:
@@ -139,7 +164,8 @@ def next_notification(pop = False):
         else:
             return notification_queue[0]
 
-def get_statustext(notification = ''):
+
+def get_statustext(notification=''):
     output = ''
     try:
         if not notification:
@@ -149,10 +175,11 @@ def get_statustext(notification = ''):
 
         p = subprocess.Popen(command, stdout=subprocess.PIPE)
 
-        output = p.stdout.read()
+        # Get first line
+        output = p.stdout.readline()[:-1]
     except:
-        sys.stderr.write("%s: could not read status message (%s)\n"
-                         % (sys.argv[0], ' '.join(STATUS_COMMAND)))
+        sys.stderr.write("{}: could not read status message ({})\n"
+                         .format(sys.argv[0], ' '.join(STATUS_COMMAND)))
 
     # Error - STATUS_COMMAND didn't exist or delivered empty result
     # Fallback to notification only
@@ -160,6 +187,7 @@ def get_statustext(notification = ''):
         output = notification
 
     return output
+
 
 def message_thread(dummy):
     last_status_update = 0
@@ -188,7 +216,7 @@ def message_thread(dummy):
                 next_notification(True)
                 notif = next_notification()
 
-            if update_status == True:
+            if update_status:
                 last_notification_update = current_time
 
         if current_time > last_status_update + STATUS_UPDATE_INTERVAL:
@@ -210,6 +238,7 @@ def message_thread(dummy):
 
         time.sleep(0.1)
 
+
 class NotificationFetcher(dbus.service.Object):
     _id = 0
 
@@ -225,13 +254,14 @@ class NotificationFetcher(dbus.service.Object):
             self._id += 1
             notification_id = self._id
 
-        text = ("%s %s" % (summary, body)).strip()
-        add_notification( [notification_id,
+        text = ("{} {}".format(summary, body)).strip()
+        add_notification([notification_id,
                           text[:NOTIFICATION_MAX_LENGTH],
-                          int(expire_timeout) / 1000.0] )
+                          int(expire_timeout) / 1000.0])
         return notification_id
 
-    @dbus.service.method("org.freedesktop.Notifications", in_signature='', out_signature='as')
+    @dbus.service.method("org.freedesktop.Notifications", in_signature='',
+                         out_signature='as')
     def GetCapabilities(self):
         return ("body")
 
@@ -239,66 +269,73 @@ class NotificationFetcher(dbus.service.Object):
     def NotificationClosed(self, id_in, reason_in):
         pass
 
-    @dbus.service.method("org.freedesktop.Notifications", in_signature='u', out_signature='')
+    @dbus.service.method("org.freedesktop.Notifications", in_signature='u',
+                         out_signature='')
     def CloseNotification(self, id):
         pass
 
-    @dbus.service.method("org.freedesktop.Notifications", in_signature='', out_signature='ssss')
+    @dbus.service.method("org.freedesktop.Notifications", in_signature='',
+                         out_signature='ssss')
     def GetServerInformation(self):
-      return ("statnot", "http://code.k2h.se", "0.0.2", "1")
+        return ("statnot", "http://code.k2h.se", "0.0.2", "1")
+
 
 if __name__ == '__main__':
     for curarg in sys.argv[1:]:
         if curarg in ('-v', '--version'):
-            print "%s CURVERSION" % sys.argv[0]
+            print("{} CURVERSION".format(sys.argv[0]))
             sys.exit(1)
         elif curarg in ('-h', '--help'):
-            print "  Usage: %s [-h] [--help] [-v] [--version] [configuration file]" % sys.argv[0]
-            print "    -h, --help:    Print this help and exit"
-            print "    -v, --version: Print version and exit"
-            print ""
-            print "  Configuration:"
-            print "    A file can be read to set the configuration."
-            print "    This configuration file must be written in valid python,"
-            print "    which will be read if the filename is given on the command line."
-            print "    You do only need to set the variables you want to change, and can"
-            print "    leave the rest out."
-            print ""
-            print "    Below is an example of a configuration which sets the defaults."
-            print ""
-            print "      # Default time a notification is show, unless specified in notification"
-            print "      DEFAULT_NOTIFY_TIMEOUT = 3000 # milliseconds"
-            print "      "
-            print "      # Maximum time a notification is allowed to show"
-            print "      MAX_NOTIFY_TIMEOUT = 5000 # milliseconds"
-            print "      "
-            print "      # Maximum number of characters in a notification. "
-            print "      NOTIFICATION_MAX_LENGTH = 100 # number of characters"
-            print "      "
-            print "      # Time between regular status updates"
-            print "      STATUS_UPDATE_INTERVAL = 2.0 # seconds"
-            print "      "
-            print "      # Command to fetch status text from. We read from stdout."
-            print "      # Each argument must be an element in the array"
-            print "      # os must be imported to use os.getenv"
-            print "      import os"
-            print "      STATUS_COMMAND = ['/bin/sh', '%s/.statusline.sh' % os.getenv('HOME')] "
-            print ""
-            print "      # Always show text from STATUS_COMMAND? If false, only show notifications"
-            print "      USE_STATUSTEXT=True"
-            print "      "
-            print "      # Put incoming notifications in a queue, so each one is shown."
-            print "      # If false, the most recent notification is shown directly."
-            print "      QUEUE_NOTIFICATIONS=True"
-            print "      "
-            print "      # update_text(text) is called when the status text should be updated"
-            print "      # If there is a pending notification to be formatted, it is appended as"
-            print "      # the final argument to the STATUS_COMMAND, e.g. as $1 in default shellscript"
-            print ""
-            print "      # dwm statusbar update"
-            print "      import subprocess"
-            print "      def update_text(text):"
-            print "          subprocess.call(['xsetroot', '-name', text])"
+            usage = """\
+Usage: {} [-h] [--help] [-v] [--version] [configuration file]"
+    -h, --help:    Print this help and exit
+    -v, --version: Print version and exit
+
+Configuration:
+  A file can be read to set the configuration.
+  This configuration file must be written in valid python,
+  which will be read if the filename is given on the command line.
+  You do only need to set the variables you want to change, and can
+  leave the rest out.
+
+  Below is an example of a configuration which sets the defaults.
+
+    # Default time a notification is show, unless specified in notification
+    DEFAULT_NOTIFY_TIMEOUT = 3000 # milliseconds
+
+    # Maximum time a notification is allowed to show
+    MAX_NOTIFY_TIMEOUT = 5000 # milliseconds"
+
+    # Maximum number of characters in a notification.
+    NOTIFICATION_MAX_LENGTH = 100 # number of characters
+
+    # Time between regular status updates
+    STATUS_UPDATE_INTERVAL = 2.0 # seconds
+
+    # Command to fetch status text from. We read from stdout.
+    # Each argument must be an element in the array
+    # os must be imported to use os.getenv
+    import os"
+    STATUS_COMMAND = ['/bin/sh', '{}/.statusline.sh'.format(os.getenv('HOME'))]
+
+    # Always show text from STATUS_COMMAND? If false, only show notifications
+    USE_STATUSTEXT = True
+
+    # Put incoming notifications in a queue, so each one is shown.
+    # If false, the most recent notification is shown directly.
+    QUEUE_NOTIFICATIONS = True"
+
+    # update_text(text) is called when the status text should be updated
+    # If there is a pending notification to be formatted, it is appended as
+    # the final argument to the STATUS_COMMAND, e.g. as $1 in default
+    # shellscript
+
+    # dwm statusbar update
+    import subprocess
+    def update_text(text):
+        subprocess.call(['xsetroot', '-name', text])
+""".format(sys.argv[0], '{}')
+            print(usage)
             sys.exit(1)
         else:
             readconfig(curarg)
@@ -316,4 +353,3 @@ if __name__ == '__main__':
 
     while 1:
         context.iteration(True)
-
